@@ -4,7 +4,7 @@ A lightweight Mesh Router agent that registers routes with the mesh-router-backe
 
 ## Purpose
 
-This agent is part of the Mesh Router architecture, designed to reduce latency by allowing direct connections to PCS instances. It registers domain routes: the CF Worker and the OpenResty gateway both use their `ip` field, and the gateway uses `domain` as the TLS server name.
+This agent is part of the Mesh Router architecture, designed to reduce latency by allowing direct connections to PCS instances. It registers domain routes: the OpenResty gateways connect to their `ip` field, with the box's hop name `<user>.box.<zone>` (cert0) as the TLS server name. (The Cloudflare Worker that also read them was retired 2026-11-16.)
 
 ## How It Works
 
@@ -107,12 +107,12 @@ The agent registers 2 routes, one per scheme, at `ROUTE_PRIORITY`:
 
 | Type | Priority | Domain | Scheme | Used By |
 |------|----------|--------|--------|---------|
-| `domain` | 1 | `88-187-147-189.ip.nsl.sh` | https | CF Worker, OpenResty Gateway |
-| `domain` | 1 | `88-187-147-189.ip.nsl.sh` | http | CF Worker, OpenResty Gateway |
+| `domain` | 1 | `88-187-147-189.ip.nsl.sh` | https | OpenResty Gateway |
+| `domain` | 1 | `88-187-147-189.ip.nsl.sh` | http | OpenResty Gateway |
 
 Without an IP zone there is no agent route. The box's sslip.io names
-(Let's Encrypt) are not registered as routes: the CF Worker builds them from the
-route's `ip` when the ip.<zone> path fails.
+(Let's Encrypt) are not registered as routes (the retired CF Worker built them from the
+route's `ip` as its fallback).
 
 ### Route Validation
 
@@ -136,7 +136,7 @@ Example response:
 
 ### Why Domain Routes?
 
-- **CF Workers cannot fetch IP addresses** (Cloudflare error 1003)
+- **Historically, CF Workers could not fetch IP addresses** (Cloudflare error 1003); the Worker was retired 2026-11-16, the route shape stayed
 - **Domain routes** use our own IP-encoding DNS (ip.<zone>) to resolve IPs
 - **Validation needs the name to resolve**: with `IP_ZONE`, route registration depends on our nameserver
 
@@ -194,16 +194,16 @@ docker run -e PROVIDER="https://api.nsl.sh,userid,signature" mesh-router-agent
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                    Cloudflare Worker                        │
-│     (uses domain routes: ip.<zone>, fallback sslip.io)      │
+│               Our nameservers (PowerDNS)                    │
+│  dot names → the box itself · dash names → the gateways     │
 └─────────────────────────────────────────────────────────────┘
                               │
               ┌───────────────┴───────────────┐
               ▼                               ▼
     ┌─────────────────┐             ┌─────────────────┐
-    │  Domain Routes  │             │ Gateway Fallback│
-    │  (ip.<zone>)    │             │  (OpenResty)    │
-    │  priority 1     │             │ connects by ip  │
+    │   Dot names     │             │    Gateways     │
+    │ <app>.<user>.   │             │  (OpenResty)    │
+    │ <zone>, direct  │             │ connects by ip  │
     └─────────────────┘             └─────────────────┘
               │                               │
               │                     ┌─────────┴─────────┐
