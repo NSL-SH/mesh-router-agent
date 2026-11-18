@@ -175,6 +175,44 @@ export async function requestCertificate(
 }
 
 /**
+ * Fetch the CA the backend signs with now (public, no auth).
+ * Returns null when it cannot be had or is not a certificate: a CA check that fails
+ * must never be read as "the CA changed".
+ */
+export async function fetchCurrentCaCertificate(backendUrl: string): Promise<string | null> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), HTTP_TIMEOUT);
+  try {
+    const response = await fetch(`${backendUrl}/router/api/ca-cert`, { signal: controller.signal });
+    if (!response.ok) {
+      return null;
+    }
+    const pem = await response.text();
+    forge.pki.certificateFromPem(pem); // throws on anything but a certificate
+    return pem;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+/**
+ * True when two PEM certificates are different certificates (compared on their DER,
+ * so whitespace or line endings never count as a change).
+ */
+export function caCertificateChanged(currentPem: string, fetchedPem: string): boolean {
+  const der = (pem: string) =>
+    forge.asn1.toDer(forge.pki.certificateToAsn1(forge.pki.certificateFromPem(pem))).getBytes();
+  try {
+    return der(currentPem) !== der(fetchedPem);
+  } catch {
+    // The stored CA does not parse: a fresh certificate rewrites it
+    return true;
+  }
+}
+
+/**
  * Check if certificate needs renewal (less than 50% lifetime remaining)
  */
 export function needsRenewal(expiresAt: Date): boolean {

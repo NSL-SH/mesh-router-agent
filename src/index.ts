@@ -13,6 +13,8 @@ import {
   requestCertificate,
   needsRenewal,
   formatTimeRemaining,
+  fetchCurrentCaCertificate,
+  caCertificateChanged,
   CertificateState,
 } from './services/CertificateManager.js';
 import { waitForUpstreamTls } from './services/UpstreamReadiness.js';
@@ -204,11 +206,20 @@ async function main() {
         }
       }
 
-      // Check certificate renewal
-      if (certState && needsRenewal(certState.expiresAt)) {
-        console.log(`[${new Date().toISOString()}] Certificate renewal needed (expires in ${formatTimeRemaining(certState.expiresAt)})`);
-        const keyPem = await ensureKeyPair();
-        certState = await requestCertificate(provider, keyPem, currentIp);
+      // Check certificate renewal: half its lifetime gone, or the backend now signs
+      // with another CA (a CA lost and regenerated). In the second case the gateways
+      // trust only the new CA, so this box is unreachable until it renews: renew now,
+      // not up to 36h later. A failed CA check changes nothing.
+      if (certState) {
+        const currentCa = await fetchCurrentCaCertificate(provider.backendUrl);
+        const caChanged = currentCa !== null && caCertificateChanged(certState.caCertificate, currentCa);
+        if (caChanged || needsRenewal(certState.expiresAt)) {
+          console.log(caChanged
+            ? `[${new Date().toISOString()}] The backend CA changed - renewing the certificate now`
+            : `[${new Date().toISOString()}] Certificate renewal needed (expires in ${formatTimeRemaining(certState.expiresAt)})`);
+          const keyPem = await ensureKeyPair();
+          certState = await requestCertificate(provider, keyPem, currentIp);
+        }
       }
 
       // Update IP in all routes if changed
