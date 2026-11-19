@@ -88,6 +88,9 @@ async function main() {
       console.log('\nChecking backend version...');
       const versionInfo = await checkBackendVersion(provider.backendUrl);
 
+      if (versionInfo.unreachable) {
+        throw new Error(`Backend unreachable at ${provider.backendUrl}: ${versionInfo.error}`);
+      }
       if (!versionInfo.compatible) {
         throw new Error(`Backend version incompatible (v${versionInfo.version}). Requires v2+. ${versionInfo.error || ''}`);
       }

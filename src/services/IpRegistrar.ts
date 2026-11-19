@@ -315,6 +315,11 @@ export interface BackendVersionInfo {
   version: number;
   /** The provider's IP zone (ip.nsl.sh); absent from a backend that runs no nameserver. */
   ipZone?: string;
+  /**
+   * The request never got an HTTP answer (DNS, connect, TLS, timeout). Not a
+   * verdict on the backend's version: report it as a network error.
+   */
+  unreachable?: boolean;
   error?: string;
 }
 
@@ -324,8 +329,21 @@ export interface BackendVersionInfo {
  * Used for graceful migration - clients wait if backend is outdated.
  */
 export async function checkBackendVersion(backendUrl: string): Promise<BackendVersionInfo> {
+  let text: string;
   try {
-    const text = await httpGet(`${backendUrl}/router/api/version`);
+    text = await httpGet(`${backendUrl}/router/api/version`);
+  } catch (error) {
+    // An HTTP error status is an answer (an old backend without /version);
+    // anything else means the request never reached the backend.
+    const message = error instanceof Error ? error.message : 'Version check failed';
+    if (/^HTTP \d+/.test(message)) {
+      return { compatible: false, version: 0, error: message };
+    }
+    const cause = error instanceof Error ? (error as Error & { cause?: { code?: string; message?: string } }).cause : undefined;
+    const detail = cause?.code || cause?.message;
+    return { compatible: false, version: 0, unreachable: true, error: detail ? `${message} (${detail})` : message };
+  }
+  try {
     const data = JSON.parse(text);
 
     if (typeof data.version !== 'number') {
@@ -336,7 +354,7 @@ export async function checkBackendVersion(backendUrl: string): Promise<BackendVe
     const ipZone = typeof data.ipZone === 'string' && data.ipZone ? data.ipZone : undefined;
     return { compatible, version: data.version, ...(ipZone ? { ipZone } : {}) };
   } catch (error) {
-    // Endpoint doesn't exist or returned error - old backend
+    // Not JSON: something answered, but not a v2 backend
     return {
       compatible: false,
       version: 0,
